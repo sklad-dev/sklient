@@ -1,0 +1,7 @@
+.DS_Store
+.zig-cache
+zig-out
+.vscode
+
+.sklad
+config
