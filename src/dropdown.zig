@@ -1,7 +1,7 @@
 const std = @import("std");
 const codes = @import("codes.zig");
 
-pub fn Dropdown(num_options: u8, title: []const u8, options: [num_options][]const u8) type {
+pub fn Dropdown(comptime num_options: u8, comptime title: []const u8, comptime options: [num_options][]const u8) type {
     return struct {
         const Self = @This();
 
@@ -47,9 +47,10 @@ pub fn Dropdown(num_options: u8, title: []const u8, options: [num_options][]cons
 
         pub fn renderSelectedOption(self: *const Self, writer: *std.Io.Writer) !void {
             try writer.print(
-                "{s} {s} {s}",
+                "{s}{s} {s} {s} ",
                 .{
                     codes.HIGHLIGHT,
+                    codes.BOLD_START,
                     self.options[self.selected_index],
                     codes.RESET,
                 },

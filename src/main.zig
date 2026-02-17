@@ -1,4 +1,5 @@
 const std = @import("std");
+const input_field = @import("input_field.zig");
 const dropdown = @import("dropdown.zig");
 const cli = @import("cli.zig");
 const codes = @import("codes.zig");
@@ -24,16 +25,6 @@ fn restoreScreen(fd: *const std.fs.File) !void {
     try fd.writeAll(codes.EXIT_SCREEN);
 }
 
-const QueryKindDropdown = dropdown.Dropdown(
-    3,
-    "query",
-    [_][]const u8{
-        "set",
-        "get",
-        "delete",
-    },
-);
-
 pub fn main() !void {
     const allocator = std.heap.smp_allocator;
 
@@ -49,12 +40,11 @@ pub fn main() !void {
     try createScreen(&stdout);
     defer restoreScreen(&stdout) catch {};
 
-    var query_kind_dropdown = QueryKindDropdown{};
-
     var buf: [1]u8 = undefined;
     var writer = stdout.writer(&[0]u8{});
+
     try writer.interface.writeAll(cli.INPUT_PREFIX);
-    try query_kind_dropdown.renderQueryKindSelector(&writer.interface);
+    try cli_instance.query_builder.render(cli.INPUT_PREFIX.len, &writer.interface);
 
     while (true) {
         const n = try stdin.read(&buf);
@@ -62,46 +52,54 @@ pub fn main() !void {
 
         const key = buf[0];
 
-        if (key == 'q' or key == 3) break;
+        if (key == 3) break;
 
         switch (cli_instance.state) {
             .empty => {
                 if (key == ' ') {
-                    cli_instance.nextState();
-                    try stdout.writeAll(codes.CLEAR_SCREEN);
-                    try writer.interface.writeAll(cli.INPUT_PREFIX);
-                    try query_kind_dropdown.render(cli.INPUT_PREFIX.len, &writer.interface);
+                    try cli_instance.nextState();
+                    try writer.interface.writeAll(codes.CLEAR_SCREEN ++ cli.INPUT_PREFIX);
+                    try cli_instance.query_builder.render(cli.INPUT_PREFIX.len, &writer.interface);
                 }
             },
             .selectingQueryKind => {
+                const options_num: u8 = @intCast(cli_instance.query_builder.query_kind_dropdown.?.options.len);
                 if (key == 66) {
-                    query_kind_dropdown.selected_index = (query_kind_dropdown.selected_index + 1) % 3;
+                    cli_instance.query_builder.query_kind_dropdown.?.selected_index = (cli_instance.query_builder.query_kind_dropdown.?.selected_index + 1) % options_num;
                 } else if (key == 65) {
-                    if (query_kind_dropdown.selected_index == 0) {
-                        query_kind_dropdown.selected_index = 2;
+                    if (cli_instance.query_builder.query_kind_dropdown.?.selected_index == 0) {
+                        cli_instance.query_builder.query_kind_dropdown.?.selected_index = options_num - 1;
                     } else {
-                        query_kind_dropdown.selected_index = query_kind_dropdown.selected_index - 1;
+                        cli_instance.query_builder.query_kind_dropdown.?.selected_index = cli_instance.query_builder.query_kind_dropdown.?.selected_index - 1;
                     }
                 } else if (key == 10) {
-                    cli_instance.nextState();
+                    try cli_instance.nextState();
 
-                    try stdout.writeAll(codes.CLEAR_SCREEN);
-                    try writer.interface.writeAll(cli.INPUT_PREFIX);
-                    try query_kind_dropdown.renderSelectedOption(&writer.interface);
-                    try writer.interface.writeAll(" ");
+                    try writer.interface.writeAll(codes.CLEAR_SCREEN ++ cli.INPUT_PREFIX);
+                    try cli_instance.query_builder.render(cli.INPUT_PREFIX.len, &writer.interface);
 
                     continue;
                 } else {
                     continue;
                 }
 
-                try stdout.writeAll(codes.CLEAR_SCREEN);
-                try writer.interface.writeAll(cli.INPUT_PREFIX);
-                try query_kind_dropdown.render(cli.INPUT_PREFIX.len, &writer.interface);
+                try writer.interface.writeAll(codes.CLEAR_SCREEN ++ cli.INPUT_PREFIX);
+                try cli_instance.query_builder.render(cli.INPUT_PREFIX.len, &writer.interface);
+            },
+            .providingParameters => {
+                if (key == 10) {
+                    try cli_instance.nextState();
+                } else {
+                    if (key == 127) {
+                        _ = (try cli_instance.query_builder.activeBuffer()).?.pop();
+                    } else {
+                        try (try cli_instance.query_builder.activeBuffer()).?.append(cli_instance.query_builder.allocator, key);
+                    }
+                }
+                try writer.interface.writeAll(codes.CLEAR_SCREEN ++ cli.INPUT_PREFIX);
+                try cli_instance.query_builder.render(cli.INPUT_PREFIX.len, &writer.interface);
             },
             else => break,
         }
     }
-
-    try stdout.writeAll("\n");
 }
