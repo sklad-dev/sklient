@@ -51,10 +51,14 @@ pub fn Dropdown(comptime num_options: u8, comptime title: []const u8, comptime o
                 .{
                     codes.HIGHLIGHT,
                     codes.BOLD_START,
-                    self.options[self.selected_index],
+                    self.selected(),
                     codes.RESET,
                 },
             );
+        }
+
+        pub inline fn selected(self: *const Self) []const u8 {
+            return self.options[self.selected_index];
         }
     };
 }

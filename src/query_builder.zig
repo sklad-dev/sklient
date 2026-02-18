@@ -68,6 +68,11 @@ pub const QueryBuilder = struct {
         }
     }
 
+    pub fn generateQueryString(self: *QueryBuilder, allocator: std.mem.Allocator, buffer: *std.ArrayList(u8)) !void {
+        try buffer.appendSlice(allocator, self.query_kind_dropdown.?.selected());
+        try self.query.?.generateQueryString(allocator, buffer);
+    }
+
     pub fn nextState(self: *QueryBuilder) !bool {
         if (self.query) |*q| return try q.nextState();
 

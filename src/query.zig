@@ -49,10 +49,26 @@ pub const Query = union(QueryKind) {
         }.func;
     }
 
+    fn delegateWithTwoArg(
+        comptime method_name: []const u8,
+        comptime FirstArgType: type,
+        comptime SecondArgType: type,
+        comptime ReturnType: type,
+    ) fn (*Query, FirstArgType, SecondArgType) ReturnType {
+        return struct {
+            fn func(self: *Query, arg1: FirstArgType, arg2: SecondArgType) ReturnType {
+                return switch (self.*) {
+                    inline else => |*variant| @call(.auto, @field(@TypeOf(variant.*), method_name), .{ variant, arg1, arg2 }),
+                };
+            }
+        }.func;
+    }
+
     pub const activeBuffer = delegate("activeBuffer", anyerror!?*std.ArrayList(u8));
     pub const deinit = delegate("deinit", void);
     pub const nextState = delegate("nextState", anyerror!bool);
     pub const render = delegateWithArg("render", *std.Io.Writer, anyerror!void);
+    pub const generateQueryString = delegateWithTwoArg("generateQueryString", std.mem.Allocator, *std.ArrayList(u8), anyerror!void);
 };
 
 pub const QueryField = struct {
@@ -138,6 +154,13 @@ pub fn MultiFieldQuery(comptime num_fields: u8, comptime labels: [num_fields][]c
             for (self.fields[0 .. self.current_field_index + 1], 0..) |*field, i| {
                 if (i > 0) try writer.writeByte(' ');
                 try (try field.getField()).render(writer);
+            }
+        }
+
+        pub fn generateQueryString(self: *Self, allocator: std.mem.Allocator, buffer: *std.ArrayList(u8)) !void {
+            for (self.fields[0 .. self.current_field_index + 1]) |*field| {
+                try buffer.append(allocator, ' ');
+                try buffer.appendSlice(allocator, field.buffer.items);
             }
         }
     };

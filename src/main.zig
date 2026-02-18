@@ -3,6 +3,9 @@ const input_field = @import("input_field.zig");
 const dropdown = @import("dropdown.zig");
 const cli = @import("cli.zig");
 const codes = @import("codes.zig");
+const request = @import("request.zig");
+
+const Client = @import("client.zig").Client;
 
 fn switchToRawMode(fd: *const std.fs.File) !std.posix.termios {
     var raw = try std.posix.tcgetattr(fd.handle);
@@ -45,6 +48,10 @@ pub fn main() !void {
 
     try writer.interface.writeAll(cli.INPUT_PREFIX);
     try cli_instance.query_builder.render(cli.INPUT_PREFIX.len, &writer.interface);
+
+    var client = try Client.init(allocator, [4]u8{ 127, 0, 0, 1 }, 7733);
+    defer client.deinit();
+    try client.connect();
 
     while (true) {
         const n = try stdin.read(&buf);
@@ -97,6 +104,32 @@ pub fn main() !void {
                     }
                 }
                 try writer.interface.writeAll(codes.CLEAR_SCREEN ++ cli.INPUT_PREFIX);
+                try cli_instance.query_builder.render(cli.INPUT_PREFIX.len, &writer.interface);
+            },
+            .executing => {
+                try cli_instance.query_builder.generateQueryString(
+                    cli_instance.allocator,
+                    &cli_instance.request_buffer,
+                );
+
+                var json_writer = std.Io.Writer.Allocating.init(allocator);
+                defer json_writer.deinit();
+
+                const req = request.Request{
+                    .kind = .query,
+                    .query = cli_instance.request_buffer.items,
+                    .timestamp = std.time.microTimestamp(),
+                };
+                try req.toString(&json_writer.writer);
+
+                const response = try client.send(try json_writer.toOwnedSlice());
+
+                try writer.interface.writeByte('\n');
+                try writer.interface.writeAll(response);
+
+                try cli_instance.nextState();
+
+                try writer.interface.writeAll("\n" ++ cli.INPUT_PREFIX);
                 try cli_instance.query_builder.render(cli.INPUT_PREFIX.len, &writer.interface);
             },
             else => break,

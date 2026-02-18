@@ -53,7 +53,11 @@ pub const Cli = struct {
                     self.state = .executing;
                 }
             },
-            .executing => self.state = .empty,
+            .executing => {
+                self.query_builder.deinit();
+                self.query_builder = try query_builder.QueryBuilder.init(self.allocator);
+                self.state = .empty;
+            },
             .awaitingContinue => self.state = .empty,
         }
     }
