@@ -18,9 +18,10 @@ pub fn Dropdown(comptime num_options: u8, comptime title: []const u8, comptime o
         pub fn render(self: *const Self, comptime offset: u32, writer: *std.Io.Writer) !void {
             try self.renderQueryKindSelector(writer);
             for (self.options, 0..) |option, i| {
+                try writer.writeByte('\n');
                 if (self.selected_index == i) {
                     try writer.print(
-                        " " ** offset ++ "{s}>{s} {s}\n",
+                        " " ** offset ++ "{s}>{s} {s}",
                         .{
                             codes.HIGHLIGHT,
                             option,
@@ -28,14 +29,14 @@ pub fn Dropdown(comptime num_options: u8, comptime title: []const u8, comptime o
                         },
                     );
                 } else {
-                    try writer.print(" " ** offset ++ " {s}\n", .{option});
+                    try writer.print(" " ** offset ++ " {s}", .{option});
                 }
             }
         }
 
         pub fn renderQueryKindSelector(self: *const Self, writer: *std.Io.Writer) !void {
             try writer.print(
-                "{s}{s} {s} {s}\n",
+                "{s}{s} {s} {s}",
                 .{
                     codes.HIGHLIGHT,
                     codes.GREY,

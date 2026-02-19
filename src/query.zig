@@ -1,6 +1,10 @@
 const std = @import("std");
 const InputField = @import("input_field.zig").InputField;
 
+const delegate = @import("union_helpers.zig").delegate;
+const delegateWithArg = @import("union_helpers.zig").delegateWithArg;
+const delegateWithTwoArg = @import("union_helpers.zig").delegateWithTwoArg;
+
 const DEFAULT_BUFFER_SIZE = 256;
 
 pub const QueryKind = enum(u8) {
@@ -22,53 +26,11 @@ pub const Query = union(QueryKind) {
     getRange: GetRangeQuery,
     delete: DeleteQuery,
 
-    fn delegate(
-        comptime method_name: []const u8,
-        comptime ReturnType: type,
-    ) fn (*Query) ReturnType {
-        return struct {
-            fn func(self: *Query) ReturnType {
-                return switch (self.*) {
-                    inline else => |*variant| @call(.auto, @field(@TypeOf(variant.*), method_name), .{variant}),
-                };
-            }
-        }.func;
-    }
-
-    fn delegateWithArg(
-        comptime method_name: []const u8,
-        comptime ArgType: type,
-        comptime ReturnType: type,
-    ) fn (*Query, ArgType) ReturnType {
-        return struct {
-            fn func(self: *Query, arg: ArgType) ReturnType {
-                return switch (self.*) {
-                    inline else => |*variant| @call(.auto, @field(@TypeOf(variant.*), method_name), .{ variant, arg }),
-                };
-            }
-        }.func;
-    }
-
-    fn delegateWithTwoArg(
-        comptime method_name: []const u8,
-        comptime FirstArgType: type,
-        comptime SecondArgType: type,
-        comptime ReturnType: type,
-    ) fn (*Query, FirstArgType, SecondArgType) ReturnType {
-        return struct {
-            fn func(self: *Query, arg1: FirstArgType, arg2: SecondArgType) ReturnType {
-                return switch (self.*) {
-                    inline else => |*variant| @call(.auto, @field(@TypeOf(variant.*), method_name), .{ variant, arg1, arg2 }),
-                };
-            }
-        }.func;
-    }
-
-    pub const activeBuffer = delegate("activeBuffer", anyerror!?*std.ArrayList(u8));
-    pub const deinit = delegate("deinit", void);
-    pub const nextState = delegate("nextState", anyerror!bool);
-    pub const render = delegateWithArg("render", *std.Io.Writer, anyerror!void);
-    pub const generateQueryString = delegateWithTwoArg("generateQueryString", std.mem.Allocator, *std.ArrayList(u8), anyerror!void);
+    pub const activeBuffer = delegate(Query, "activeBuffer", anyerror!?*std.ArrayList(u8));
+    pub const deinit = delegate(Query, "deinit", void);
+    pub const nextState = delegate(Query, "nextState", anyerror!bool);
+    pub const render = delegateWithArg(Query, "render", *std.Io.Writer, anyerror!void);
+    pub const generateQueryString = delegateWithTwoArg(Query, "generateQueryString", std.mem.Allocator, *std.ArrayList(u8), anyerror!void);
 };
 
 pub const QueryField = struct {

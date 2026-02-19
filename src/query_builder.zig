@@ -1,6 +1,5 @@
 const std = @import("std");
 const Dropdown = @import("dropdown.zig").Dropdown;
-const InputField = @import("input_field.zig").InputField;
 const Query = @import("query.zig").Query;
 const DeleteQuery = @import("query.zig").DeleteQuery;
 const GetQuery = @import("query.zig").GetQuery;
@@ -12,7 +11,6 @@ pub const QueryBuilder = struct {
     allocator: std.mem.Allocator,
     query: ?Query,
     query_kind_dropdown: ?QueryKindDropdown,
-    input_field: ?InputField,
 
     const QueryKindDropdown = Dropdown(
         4,
@@ -30,12 +28,13 @@ pub const QueryBuilder = struct {
             .allocator = allocator,
             .query = null,
             .query_kind_dropdown = null,
-            .input_field = null,
         };
     }
 
     pub fn deinit(self: *QueryBuilder) void {
         if (self.query) |*q| q.deinit();
+        self.query = null;
+        self.query_kind_dropdown = null;
     }
 
     pub fn activeBuffer(self: *QueryBuilder) !?*std.ArrayList(u8) {

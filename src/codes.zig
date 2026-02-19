@@ -2,6 +2,9 @@ pub const NEW_SCREEN = "\x1b[?1049h\x1b[2J\x1b[H";
 pub const EXIT_SCREEN = "\x1b[2J\x1b[H\x1b[?1049l";
 pub const CLEAR_SCREEN = "\x1b[H\x1b[2J";
 
+pub const ERASE_LINE = "\x1b[2K";
+pub const MOVE_UP = "\x1b[1A";
+
 pub const HIGHLIGHT = "\x1b[7m";
 pub const UNDERLINE_START = "\x1b[4m";
 pub const UNDERLINE_END = "\x1b[24m";
