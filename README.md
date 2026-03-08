@@ -1,6 +1,6 @@
 # sklient
 
-A terminal client for [Sklad](https://github.com/sklad-db/Sklad) database.
+A terminal client for [Sklad](https://github.com/sklad-dev/Sklad) database.
 
 ## Features
 
