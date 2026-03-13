@@ -3,6 +3,7 @@ const codes = @import("codes.zig");
 
 const Client = @import("client.zig").Client;
 const Keys = @import("constants.zig").Keys;
+const Response = @import("response.zig").Response;
 const Request = @import("request.zig").Request;
 const RequestKind = @import("request.zig").RequestKind;
 
@@ -70,10 +71,11 @@ pub const RawCli = struct {
         defer json_writer.deinit();
         try req.toString(&json_writer.writer);
 
-        const response = try self.client.send(try json_writer.toOwnedSlice());
-        try self.writer.writeByte('\n');
-        try self.writer.writeAll(response);
-        try self.writer.writeByte('\n');
+        const response_bytes = try self.client.send(try json_writer.toOwnedSlice());
+        const response = try std.json.parseFromSlice(Response, self.allocator, response_bytes, .{});
+        defer response.deinit();
+
+        try response.value.render(self.writer);
 
         try self.nextState();
     }

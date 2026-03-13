@@ -2,16 +2,11 @@ const std = @import("std");
 const codes = @import("codes.zig");
 
 pub const InputField = struct {
-    allocator: std.mem.Allocator,
     label: []const u8,
     buffer: *std.ArrayList(u8),
 
-    pub fn init(allocator: std.mem.Allocator, label: []const u8, buffer: *std.ArrayList(u8)) !InputField {
-        return InputField{
-            .allocator = allocator,
-            .label = label,
-            .buffer = buffer,
-        };
+    pub fn init(label: []const u8, buffer: *std.ArrayList(u8)) InputField {
+        return .{ .label = label, .buffer = buffer };
     }
 
     pub fn render(self: *const InputField, writer: *std.Io.Writer) !void {
