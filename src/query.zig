@@ -115,7 +115,8 @@ pub fn MultiFieldQuery(comptime num_fields: u8, comptime labels: [num_fields][]c
         pub fn render(self: *Self, writer: *std.Io.Writer) !void {
             for (self.fields[0 .. self.current_field_index + 1], 0..) |*field, i| {
                 if (i > 0) try writer.writeByte(' ');
-                try (field.getField()).render(writer);
+                const is_active = !self.done and i == self.current_field_index;
+                try (field.getField()).render(writer, is_active);
             }
         }
 

@@ -90,6 +90,8 @@ pub const TuiCli = struct {
         );
         defer self.request_buffer.clearRetainingCapacity();
 
+        try self.renderPrompt(0);
+
         const req = Request{
             .kind = .query,
             .query = self.request_buffer.items,

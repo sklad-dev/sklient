@@ -16,7 +16,7 @@ pub fn Dropdown(comptime num_options: u8, comptime title: []const u8, comptime o
         }
 
         pub fn render(self: *const Self, comptime offset: u32, writer: *std.Io.Writer) !void {
-            try self.renderQueryKindSelector(writer);
+            try self.renderQueryKindSelector(writer, true);
             for (self.options, 0..) |option, i| {
                 try writer.writeByte('\n');
                 if (self.selected_index == i) {
@@ -34,23 +34,35 @@ pub fn Dropdown(comptime num_options: u8, comptime title: []const u8, comptime o
             }
         }
 
-        pub fn renderQueryKindSelector(self: *const Self, writer: *std.Io.Writer) !void {
-            try writer.print(
-                "{s}{s} {s} {s}",
-                .{
-                    codes.HIGHLIGHT,
-                    codes.GREY,
-                    self.title,
-                    codes.RESET,
-                },
-            );
+        pub fn renderQueryKindSelector(self: *const Self, writer: *std.Io.Writer, is_active: bool) !void {
+            if (is_active) {
+                try writer.print(
+                    "{s}{s} {s} {s}",
+                    .{
+                        codes.HIGHLIGHT,
+                        codes.GREY,
+                        self.title,
+                        codes.RESET,
+                    },
+                );
+            } else {
+                try writer.print(
+                    "{s} {s} {s}",
+                    .{
+                        codes.HIGHLIGHT,
+                        self.title,
+                        codes.RESET,
+                    },
+                );
+            }
         }
 
         pub fn renderSelectedOption(self: *const Self, writer: *std.Io.Writer) !void {
             try writer.print(
-                "{s}{s} {s} {s} ",
+                "{s}{s}{s} {s} {s} ",
                 .{
                     codes.HIGHLIGHT,
+                    codes.GREY,
                     codes.BOLD_START,
                     self.selected(),
                     codes.RESET,

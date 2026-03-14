@@ -60,7 +60,7 @@ pub const QueryBuilder = struct {
         } else {
             if (self.query_kind_dropdown == null) {
                 self.query_kind_dropdown = QueryKindDropdown{};
-                try self.query_kind_dropdown.?.renderQueryKindSelector(writer);
+                try self.query_kind_dropdown.?.renderQueryKindSelector(writer, false);
             } else {
                 try self.query_kind_dropdown.?.render(dropdown_offset, writer);
             }
