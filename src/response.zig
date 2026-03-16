@@ -48,11 +48,11 @@ const ResponseTable = struct {
             if (item != .object) continue;
 
             if (item.object.get("key")) |key| {
-                const len = valueDisplayLen(key);
+                const len = valueLength(key);
                 if (len > max_key_len) max_key_len = len;
             }
             if (item.object.get("value")) |val| {
-                const len = valueDisplayLen(val);
+                const len = valueLength(val);
                 if (len > max_val_len) max_val_len = len;
             }
         }
@@ -78,7 +78,7 @@ const ResponseTable = struct {
     }
 
     pub fn render(self: *const ResponseTable, writer: *std.Io.Writer) !void {
-        for (self.items) |item| {
+        for (self.items, 0..) |item, i| {
             if (item != .object) continue;
 
             const key = item.object.get("key") orelse continue;
@@ -87,17 +87,20 @@ const ResponseTable = struct {
             try self.writeValue(writer, key, self.key_col_width);
             try writer.writeAll(SEPARATOR);
             try self.writeValue(writer, val, self.val_col_width);
-            try writer.writeByte('\n');
+            if (i != self.items.len - 1) try writer.writeByte('\n');
         }
     }
 
     fn writeValue(self: *const ResponseTable, writer: *std.Io.Writer, value: std.json.Value, max_width: usize) !void {
         _ = self;
         var buf: [256]u8 = undefined;
+        const length = valueLength(value);
         const str = valueToString(&buf, value);
 
-        if (str.len <= max_width) {
+        if (length <= max_width) {
+            if (length == str.len + 2) try writer.writeByte('\'');
             try writer.writeAll(str);
+            if (length == str.len + 2) try writer.writeByte('\'');
             for (0..max_width - str.len) |_| {
                 try writer.writeByte(' ');
             }
@@ -108,16 +111,27 @@ const ResponseTable = struct {
         }
     }
 
-    fn valueDisplayLen(value: std.json.Value) usize {
-        var buf: [256]u8 = undefined;
-        return valueToString(&buf, value).len;
+    fn valueLength(value: std.json.Value) u64 {
+        return switch (value) {
+            .null => 4,
+            .bool => |b| if (b) 4 else 5,
+            .integer, .float => {
+                var buf: [256]u8 = undefined;
+                return valueToString(&buf, value).len;
+            },
+            .number_string => |s| s.len,
+            .string => |s| s.len + 2,
+            else => 1,
+        };
     }
 
     fn valueToString(buf: []u8, value: std.json.Value) []const u8 {
-        _ = buf;
         return switch (value) {
-            .number_string => |s| s,
-            .string => |s| s,
+            .null => "null",
+            .bool => |b| if (b) "true" else "false",
+            .integer => |i| std.fmt.bufPrint(buf, "{d}", .{i}) catch "?",
+            .float => |f| std.fmt.bufPrint(buf, "{d}", .{f}) catch "?",
+            .string, .number_string => |s| s,
             else => "?",
         };
     }
