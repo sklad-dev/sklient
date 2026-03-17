@@ -29,7 +29,6 @@ The client connects to Sklad server at `127.0.0.1:7733` by default.
 | <kbd>Ctrl</kbd>+<kbd>C</kbd> | Exit |
 
 ## Todo
-- Render the response as a table
 - Attempt reconnect
 - Pass host and port values via command line arguments
 - TUI mode functionality:
