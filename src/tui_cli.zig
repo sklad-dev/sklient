@@ -108,7 +108,9 @@ pub const TuiCli = struct {
         defer json_writer.deinit();
         try req.toString(&json_writer.writer);
 
-        const response_bytes = try self.client.send(try json_writer.toOwnedSlice());
+        const request_bytes = try json_writer.toOwnedSlice();
+        defer self.allocator.free(request_bytes);
+        const response_bytes = try self.client.send(request_bytes);
         const response = try std.json.parseFromSlice(Response, self.allocator, response_bytes, .{});
         defer response.deinit();
 
