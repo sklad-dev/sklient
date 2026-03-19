@@ -52,9 +52,9 @@ pub const QueryField = struct {
         self.buffer.deinit(self.allocator);
     }
 
-    pub inline fn getField(self: *QueryField) !*InputField {
+    pub inline fn getField(self: *QueryField) *InputField {
         if (self.field == null) {
-            self.field = try InputField.init(self.allocator, self.label, &self.buffer);
+            self.field = InputField.init(self.label, &self.buffer);
         }
         return &self.field.?;
     }
@@ -115,7 +115,8 @@ pub fn MultiFieldQuery(comptime num_fields: u8, comptime labels: [num_fields][]c
         pub fn render(self: *Self, writer: *std.Io.Writer) !void {
             for (self.fields[0 .. self.current_field_index + 1], 0..) |*field, i| {
                 if (i > 0) try writer.writeByte(' ');
-                try (try field.getField()).render(writer);
+                const is_active = !self.done and i == self.current_field_index;
+                try (field.getField()).render(writer, is_active);
             }
         }
 

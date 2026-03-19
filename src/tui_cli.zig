@@ -4,6 +4,7 @@ const query_builder = @import("query_builder.zig");
 
 const Client = @import("client.zig").Client;
 const Keys = @import("constants.zig").Keys;
+const Response = @import("response.zig").Response;
 const Request = @import("request.zig").Request;
 const RequestKind = @import("request.zig").RequestKind;
 
@@ -23,6 +24,7 @@ pub const TuiCli = struct {
     request_buffer: std.ArrayList(u8),
     client: *Client,
     writer: *std.Io.Writer,
+    has_more_results: bool = false,
 
     const State = enum(u8) {
         empty,
@@ -64,12 +66,15 @@ pub const TuiCli = struct {
                     try self.executeQuery();
                 }
             },
-            .executing => {
-                self.query_builder.deinit();
-                self.query_builder = try query_builder.QueryBuilder.init(self.allocator);
-                self.state = .empty;
+            .executing, .awaitingContinue => {
+                if (!self.has_more_results) {
+                    self.query_builder.deinit();
+                    self.query_builder = try query_builder.QueryBuilder.init(self.allocator);
+                    self.state = .empty;
+                } else {
+                    self.state = .awaitingContinue;
+                }
             },
-            .awaitingContinue => self.state = .empty,
         }
     }
 
@@ -78,6 +83,7 @@ pub const TuiCli = struct {
             .empty => try self.handleEmpty(key),
             .selectingQueryKind => try self.handleSelectingQueryKind(key),
             .providingParameters => try self.handleProvidingParameters(key),
+            .awaitingContinue => try self.handleAwaitingContinue(key),
             else => {},
         };
     }
@@ -89,22 +95,50 @@ pub const TuiCli = struct {
         );
         defer self.request_buffer.clearRetainingCapacity();
 
-        const req = Request{
+        try self.renderPrompt(0);
+        try self.sendRequest(.{
             .kind = .query,
             .query = self.request_buffer.items,
             .timestamp = std.time.microTimestamp(),
-        };
+        });
+    }
 
+    fn sendRequest(self: *TuiCli, req: Request) !void {
         var json_writer = std.Io.Writer.Allocating.init(self.allocator);
         defer json_writer.deinit();
         try req.toString(&json_writer.writer);
 
-        const response = try self.client.send(try json_writer.toOwnedSlice());
-        try self.writer.writeByte('\n');
-        try self.writer.writeAll(response);
-        try self.writer.writeByte('\n');
+        const request_bytes = try json_writer.toOwnedSlice();
+        defer self.allocator.free(request_bytes);
+        const response_bytes = try self.client.send(request_bytes);
+        const response = try std.json.parseFromSlice(Response, self.allocator, response_bytes, .{});
+        defer response.deinit();
 
-        try self.nextState();
+        self.has_more_results = switch (response.value.data) {
+            .array => |arr| arr.items.len > 0,
+            else => false,
+        };
+        try self.writer.writeByte('\n');
+        try response.value.render(self.writer, self.has_more_results);
+
+        if (self.has_more_results) {
+            self.state = .awaitingContinue;
+        } else {
+            try self.nextState();
+            switch (response.value.data) {
+                .array => try self.renderPrompt(0),
+                else => {},
+            }
+        }
+    }
+
+    fn executeContinueBatch(self: *TuiCli) !void {
+        try self.clearLines(0);
+        try self.sendRequest(.{
+            .kind = .continue_batch,
+            .query = &[_]u8{},
+            .timestamp = std.time.microTimestamp(),
+        });
     }
 
     fn handleEmpty(self: *TuiCli, key: u8) !void {
@@ -136,7 +170,20 @@ pub const TuiCli = struct {
         } else {
             try (try self.query_builder.activeBuffer()).?.append(self.allocator, key);
         }
-        try self.renderPrompt(0);
+
+        if (self.state != .awaitingContinue) {
+            try self.renderPrompt(0);
+        }
+    }
+
+    fn handleAwaitingContinue(self: *TuiCli, key: u8) !void {
+        if (key == 'n' or key == 'N') {
+            try self.executeContinueBatch();
+        } else {
+            self.has_more_results = false;
+            try self.nextState();
+            try self.renderPrompt(0);
+        }
     }
 
     fn renderPrompt(self: *TuiCli, lines_to_clean: u32) !void {

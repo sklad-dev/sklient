@@ -22,30 +22,29 @@ pub const Cli = union(CliKind) {
     }
 
     pub fn toggleMode(self: *Cli) !void {
-        if (self.canSwitchMode()) {
-            switch (self.*) {
-                .tui => |*t| {
-                    const allocator = t.allocator;
-                    const client = t.client;
-                    const writer = t.writer;
-                    t.deinit();
+        if (!self.canSwitchMode()) return;
 
-                    self.* = .{ .raw = try RawCli.init(allocator, client, writer) };
+        var allocator: std.mem.Allocator = undefined;
+        var client: *Client = undefined;
+        var writer: *std.Io.Writer = undefined;
 
-                    try writer.writeAll("\r" ++ codes.ERASE_LINE ++ INPUT_PREFIX);
-                },
-                .raw => |*r| {
-                    const allocator = r.allocator;
-                    const client = r.client;
-                    const writer = r.writer;
-                    r.deinit();
+        switch (self.*) {
+            inline else => |*v| {
+                allocator = v.allocator;
+                client = v.client;
+                writer = v.writer;
+                v.deinit();
+            },
+        }
 
-                    self.* = .{ .tui = try TuiCli.init(allocator, client, writer) };
+        self.* = switch (self.*) {
+            .tui => .{ .raw = try RawCli.init(allocator, client, writer) },
+            .raw => .{ .tui = try TuiCli.init(allocator, client, writer) },
+        };
 
-                    try writer.writeAll("\r" ++ codes.ERASE_LINE ++ INPUT_PREFIX);
-                    try self.tui.query_builder.render(INPUT_PREFIX.len, writer);
-                },
-            }
+        try writer.writeAll("\r" ++ codes.ERASE_LINE ++ INPUT_PREFIX);
+        if (self.* == .tui) {
+            try self.tui.query_builder.render(INPUT_PREFIX.len, writer);
         }
     }
 

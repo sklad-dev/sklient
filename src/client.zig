@@ -6,6 +6,7 @@ pub const Client = struct {
     host: [4]u8,
     port: u16,
     stream: ?std.net.Stream,
+    reader: ?std.net.Stream.Reader,
     read_buffer: []u8,
 
     const EMPTY_RESPONSE = [0]u8{};
@@ -16,6 +17,7 @@ pub const Client = struct {
             .host = host,
             .port = port,
             .stream = null,
+            .reader = null,
             .read_buffer = try allocator.alloc(u8, 4096),
         };
     }
@@ -28,6 +30,7 @@ pub const Client = struct {
     pub fn connect(self: *Client) !void {
         const address = std.net.Address.initIp4(self.host, self.port);
         self.stream = try std.net.tcpConnectToAddress(address);
+        self.reader = self.stream.?.reader(self.read_buffer);
     }
 
     pub fn disconnect(self: *Client) void {
@@ -38,15 +41,17 @@ pub const Client = struct {
     }
 
     fn doSend(self: *Client, payload: []const u8) !void {
-        var writer = self.stream.?.writer(&[0]u8{});
+        var buf: [4096]u8 = undefined;
+        var writer = self.stream.?.writer(&buf);
+
         try writer.interface.writeAll(payload);
         try writer.interface.writeByte('\n');
+
         try writer.interface.flush();
     }
 
     fn doReceive(self: *Client) ![]const u8 {
-        var reader = self.stream.?.reader(self.read_buffer);
-        const r: *std.Io.Reader = reader.interface();
+        const r: *std.Io.Reader = self.reader.?.interface();
 
         while (try r.takeDelimiter('\n')) |response| {
             return response;

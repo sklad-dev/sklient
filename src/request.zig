@@ -8,7 +8,7 @@ pub const RequestKind = enum(u8) {
 
 pub const Request = struct {
     kind: RequestKind,
-    query: []u8,
+    query: []const u8,
     timestamp: i64,
 
     pub inline fn toString(self: *const Request, writer: *std.Io.Writer) !void {
