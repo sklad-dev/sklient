@@ -5,16 +5,15 @@ pub const Response = struct {
     data: std.json.Value,
     errors: ?[]const u8,
 
-    pub fn render(self: *const Response, writer: *std.Io.Writer) !void {
-        try writer.writeByte('\n');
+    pub fn render(self: *const Response, writer: *std.Io.Writer, show_more_hint: bool) !void {
         switch (self.data) {
-            .null => try writer.writeAll("null"),
-            .string => |s| try writer.print("'{s}'", .{s}),
-            .integer => |i| try writer.print("{d}", .{i}),
-            .float => |f| try writer.print("{d}", .{f}),
+            .null => try writer.writeAll("null\n"),
+            .string => |s| try writer.print("'{s}'\n", .{s}),
+            .integer => |i| try writer.print("{d}\n", .{i}),
+            .float => |f| try writer.print("{d}\n", .{f}),
             .array => |arr| {
                 if (arr.items.len == 0) {
-                    try writer.writeAll("null");
+                    try writer.writeByte(' ');
                 } else {
                     const table_view = ResponseTable.init(arr.items);
                     try table_view.render(writer);
@@ -22,7 +21,18 @@ pub const Response = struct {
             },
             else => {},
         }
-        try writer.writeByte('\n');
+
+        if (show_more_hint) {
+            try writer.print(
+                "{s}{s}[n]{s} show more results{s}",
+                .{
+                    codes.HIGHLIGHT,
+                    codes.BOLD_START,
+                    codes.BOLD_END,
+                    codes.RESET,
+                },
+            );
+        }
     }
 };
 
@@ -78,7 +88,7 @@ const ResponseTable = struct {
     }
 
     pub fn render(self: *const ResponseTable, writer: *std.Io.Writer) !void {
-        for (self.items, 0..) |item, i| {
+        for (self.items) |item| {
             if (item != .object) continue;
 
             const key = item.object.get("key") orelse continue;
@@ -87,7 +97,7 @@ const ResponseTable = struct {
             try self.writeValue(writer, key, self.key_col_width);
             try writer.writeAll(SEPARATOR);
             try self.writeValue(writer, val, self.val_col_width);
-            if (i != self.items.len - 1) try writer.writeByte('\n');
+            try writer.writeByte('\n');
         }
     }
 
@@ -101,7 +111,7 @@ const ResponseTable = struct {
             if (length == str.len + 2) try writer.writeByte('\'');
             try writer.writeAll(str);
             if (length == str.len + 2) try writer.writeByte('\'');
-            for (0..max_width - str.len) |_| {
+            for (0..max_width - length) |_| {
                 try writer.writeByte(' ');
             }
         } else {

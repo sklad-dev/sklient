@@ -45,6 +45,8 @@ pub const Client = struct {
     }
 
     fn doReceive(self: *Client) ![]const u8 {
+        @memset(self.read_buffer, 0);
+
         var reader = self.stream.?.reader(self.read_buffer);
         const r: *std.Io.Reader = reader.interface();
 

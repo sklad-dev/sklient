@@ -16,6 +16,7 @@ pub const RawCli = struct {
     request_buffer: std.ArrayList(u8),
     client: *Client,
     writer: *std.Io.Writer,
+    has_more_results: bool = false,
 
     const State = enum(u8) {
         userInput,
@@ -35,7 +36,6 @@ pub const RawCli = struct {
     }
 
     pub fn deinit(self: *RawCli) void {
-        self.request_buffer.deinit(self.allocator);
         self.input_buffer.deinit(self.allocator);
     }
 
@@ -45,28 +45,34 @@ pub const RawCli = struct {
                 self.state = .executing;
                 try self.executeQuery();
             },
-            .executing => {
+            .executing, .awaitingContinue => {
                 self.input_buffer.clearRetainingCapacity();
-                self.state = .userInput;
+                if (!self.has_more_results) {
+                    self.state = .userInput;
+                } else {
+                    self.state = .awaitingContinue;
+                }
             },
-            .awaitingContinue => self.state = .userInput,
         }
     }
 
     pub fn handleInput(self: *RawCli, key: u8) !void {
         return switch (self.state) {
             .userInput => try self.handleUserInput(key),
+            .awaitingContinue => try self.handleAwaitingContinue(key),
             else => {},
         };
     }
 
     pub fn executeQuery(self: *RawCli) !void {
-        const req = Request{
+        try self.sendRequest(.{
             .kind = .query,
             .query = self.input_buffer.items,
             .timestamp = std.time.microTimestamp(),
-        };
+        });
+    }
 
+    fn sendRequest(self: *RawCli, req: Request) !void {
         var json_writer = std.Io.Writer.Allocating.init(self.allocator);
         defer json_writer.deinit();
         try req.toString(&json_writer.writer);
@@ -75,9 +81,29 @@ pub const RawCli = struct {
         const response = try std.json.parseFromSlice(Response, self.allocator, response_bytes, .{});
         defer response.deinit();
 
-        try response.value.render(self.writer);
+        self.has_more_results = switch (response.value.data) {
+            .array => |arr| arr.items.len > 0,
+            else => false,
+        };
+        try self.writer.writeByte('\n');
+        try response.value.render(self.writer, self.has_more_results);
 
         try self.nextState();
+        if (!self.has_more_results) {
+            switch (response.value.data) {
+                .array => try self.renderPrompt(),
+                else => {},
+            }
+        }
+    }
+
+    fn executeContinueBatch(self: *RawCli) !void {
+        try self.writer.writeAll("\r" ++ codes.ERASE_LINE);
+        try self.sendRequest(.{
+            .kind = .continue_batch,
+            .query = &[_]u8{},
+            .timestamp = std.time.microTimestamp(),
+        });
     }
 
     fn handleUserInput(self: *RawCli, key: u8) !void {
@@ -88,7 +114,20 @@ pub const RawCli = struct {
         } else {
             try self.input_buffer.append(self.allocator, key);
         }
-        try self.renderPrompt();
+
+        if (self.state != .awaitingContinue) {
+            try self.renderPrompt();
+        }
+    }
+
+    fn handleAwaitingContinue(self: *RawCli, key: u8) !void {
+        if (key == 'n' or key == 'N') {
+            try self.executeContinueBatch();
+        } else {
+            self.has_more_results = false;
+            try self.nextState();
+            try self.renderPrompt();
+        }
     }
 
     fn renderPrompt(self: *RawCli) !void {
