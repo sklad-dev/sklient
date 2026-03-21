@@ -129,7 +129,84 @@ pub fn MultiFieldQuery(comptime num_fields: u8, comptime labels: [num_fields][]c
     };
 }
 
-pub const SetQuery = MultiFieldQuery(2, [_][]const u8{ KEY_LABEL, VALUE_LABEL });
+/// SetQuery with optional TTL support
+/// Fields: key, value, expire (optional)
+pub const SetQuery = struct {
+    allocator: std.mem.Allocator,
+    key_field: QueryField,
+    value_field: QueryField,
+    expire_field: QueryField,
+    current_field_index: u8,
+    done: bool,
+
+    pub fn init(allocator: std.mem.Allocator) !SetQuery {
+        return .{
+            .allocator = allocator,
+            .key_field = try QueryField.init(allocator, KEY_LABEL),
+            .value_field = try QueryField.init(allocator, VALUE_LABEL),
+            .expire_field = try QueryField.init(allocator, TTL_LABEL),
+            .current_field_index = 0,
+            .done = false,
+        };
+    }
+
+    pub fn deinit(self: *SetQuery) void {
+        self.key_field.deinit();
+        self.value_field.deinit();
+        self.expire_field.deinit();
+    }
+
+    pub fn activeBuffer(self: *SetQuery) ?*std.ArrayList(u8) {
+        if (self.done) return null;
+        return switch (self.current_field_index) {
+            0 => &self.key_field.buffer,
+            1 => &self.value_field.buffer,
+            2 => &self.expire_field.buffer,
+            else => null,
+        };
+    }
+
+    pub fn nextState(self: *SetQuery) bool {
+        if (self.done) return false;
+
+        self.current_field_index += 1;
+        // After value field, expire is optional
+        // User can press enter with empty expire to skip it
+        if (self.current_field_index >= 3) {
+            self.current_field_index = 2;
+            self.done = true;
+            return false;
+        }
+
+        return true;
+    }
+
+    pub fn render(self: *SetQuery, writer: *std.Io.Writer) !void {
+        const fields = [_]*QueryField{ &self.key_field, &self.value_field, &self.expire_field };
+
+        for (fields[0 .. self.current_field_index + 1], 0..) |field, i| {
+            if (i > 0) try writer.writeByte(' ');
+            const is_active = !self.done and i == self.current_field_index;
+            try (field.getField()).render(writer, is_active);
+        }
+    }
+
+    pub fn generateQueryString(self: *SetQuery, allocator: std.mem.Allocator, buffer: *std.ArrayList(u8)) !void {
+        // Format: set <key> <value> [expire '<duration>']
+        try buffer.append(allocator, ' ');
+        try buffer.appendSlice(allocator, self.key_field.buffer.items);
+        try buffer.append(allocator, ' ');
+        try buffer.appendSlice(allocator, self.value_field.buffer.items);
+
+        // Add expire clause if specified
+        if (self.expire_field.buffer.items.len > 0) {
+            try buffer.appendSlice(allocator, " expire '");
+            try buffer.appendSlice(allocator, self.expire_field.buffer.items);
+            try buffer.append(allocator, '\'');
+        }
+    }
+};
+
 pub const GetQuery = MultiFieldQuery(1, [_][]const u8{KEY_LABEL});
 pub const GetRangeQuery = MultiFieldQuery(2, [_][]const u8{ START_KEY_LABEL, END_KEY_LABEL });
 pub const DeleteQuery = MultiFieldQuery(1, [_][]const u8{KEY_LABEL});

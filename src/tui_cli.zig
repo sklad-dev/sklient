@@ -7,6 +7,9 @@ const Keys = @import("constants.zig").Keys;
 const Response = @import("response.zig").Response;
 const Request = @import("request.zig").Request;
 const RequestKind = @import("request.zig").RequestKind;
+const Layout = @import("layout.zig").Layout;
+const History = @import("history.zig").History;
+const ResultsRenderer = @import("results_renderer.zig").ResultsRenderer;
 
 const INPUT_PREFIX = @import("constants.zig").INPUT_PREFIX;
 
@@ -24,7 +27,11 @@ pub const TuiCli = struct {
     request_buffer: std.ArrayList(u8),
     client: *Client,
     writer: *std.Io.Writer,
+    layout: *Layout,
+    history: *History,
+    results_renderer: ResultsRenderer,
     has_more_results: bool = false,
+    dropdown_visible: bool = false,
 
     const State = enum(u8) {
         empty,
@@ -34,7 +41,13 @@ pub const TuiCli = struct {
         awaitingContinue,
     };
 
-    pub fn init(allocator: std.mem.Allocator, client: *Client, writer: *std.Io.Writer) !TuiCli {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        client: *Client,
+        writer: *std.Io.Writer,
+        layout: *Layout,
+        history: *History,
+    ) !TuiCli {
         return .{
             .allocator = allocator,
             .state = .empty,
@@ -42,6 +55,9 @@ pub const TuiCli = struct {
             .request_buffer = try std.ArrayList(u8).initCapacity(allocator, 1024),
             .client = client,
             .writer = writer,
+            .layout = layout,
+            .history = history,
+            .results_renderer = ResultsRenderer.init(allocator, layout),
         };
     }
 
@@ -55,10 +71,13 @@ pub const TuiCli = struct {
             .empty => self.state = .selectingQueryKind,
             .selectingQueryKind => {
                 self.state = .providingParameters;
+                self.dropdown_visible = false;
                 self.query_builder.setQuery() catch {
                     self.state = .selectingQueryKind;
                     return;
                 };
+                // Clear dropdown overlay from results area
+                try self.results_renderer.clear();
             },
             .providingParameters => {
                 if (!(try self.query_builder.nextState())) {
@@ -95,7 +114,10 @@ pub const TuiCli = struct {
         );
         defer self.request_buffer.clearRetainingCapacity();
 
-        try self.renderPrompt(0);
+        // Store command in history
+        try self.history.addCommand(self.request_buffer.items);
+        self.history.clearResults();
+
         try self.sendRequest(.{
             .kind = .query,
             .query = self.request_buffer.items,
@@ -114,26 +136,39 @@ pub const TuiCli = struct {
         const response = try std.json.parseFromSlice(Response, self.allocator, response_bytes, .{});
         defer response.deinit();
 
-        self.has_more_results = switch (response.value.data) {
-            .array => |arr| arr.items.len > 0,
-            else => false,
-        };
-        try self.writer.writeByte('\n');
-        try response.value.render(self.writer, self.has_more_results);
+        // Check for errors
+        if (response.value.errors) |err| {
+            try self.results_renderer.renderError(err);
+            self.has_more_results = false;
+            try self.nextState();
+            try self.renderPrompt();
+            return;
+        }
+
+        // Render results based on type
+        switch (response.value.data) {
+            .null, .string, .integer, .float => {
+                try self.results_renderer.renderScalar(response.value.data);
+                self.has_more_results = false;
+            },
+            .array => |arr| {
+                self.has_more_results = arr.items.len > 0;
+                try self.results_renderer.renderKeyValuePairs(arr.items, self.has_more_results);
+            },
+            else => {
+                self.has_more_results = false;
+            },
+        }
 
         if (self.has_more_results) {
             self.state = .awaitingContinue;
         } else {
             try self.nextState();
-            switch (response.value.data) {
-                .array => try self.renderPrompt(0),
-                else => {},
-            }
+            try self.renderPrompt();
         }
     }
 
     fn executeContinueBatch(self: *TuiCli) !void {
-        try self.clearLines(0);
         try self.sendRequest(.{
             .kind = .continue_batch,
             .query = &[_]u8{},
@@ -142,9 +177,9 @@ pub const TuiCli = struct {
     }
 
     fn handleEmpty(self: *TuiCli, key: u8) !void {
-        if (key == ' ') {
+        if (key == ' ' or key == Keys.ENTER) {
             try self.nextState();
-            try self.renderPrompt(0);
+            try self.renderPrompt();
         }
     }
 
@@ -153,13 +188,26 @@ pub const TuiCli = struct {
         const options_num: u8 = @intCast(dropdown.options.len);
 
         switch (key) {
-            Keys.ARROW_DOWN => dropdown.selected_index = (dropdown.selected_index + 1) % options_num,
-            Keys.ARROW_UP => dropdown.selected_index = if (dropdown.selected_index == 0) options_num - 1 else dropdown.selected_index - 1,
-            Keys.ENTER => try self.nextState(),
+            Keys.ARROW_DOWN => {
+                dropdown.selected_index = (dropdown.selected_index + 1) % options_num;
+                self.dropdown_visible = true;
+            },
+            Keys.ARROW_UP => {
+                dropdown.selected_index = if (dropdown.selected_index == 0) options_num - 1 else dropdown.selected_index - 1;
+                self.dropdown_visible = true;
+            },
+            Keys.ENTER => {
+                try self.nextState();
+                try self.renderPrompt();
+                return;
+            },
             else => return,
         }
 
-        try self.renderPrompt(options_num);
+        try self.renderPrompt();
+        if (self.dropdown_visible) {
+            try self.renderDropdown();
+        }
     }
 
     fn handleProvidingParameters(self: *TuiCli, key: u8) !void {
@@ -174,7 +222,7 @@ pub const TuiCli = struct {
         }
 
         if (self.state != .awaitingContinue) {
-            try self.renderPrompt(0);
+            try self.renderPrompt();
         }
     }
 
@@ -184,20 +232,31 @@ pub const TuiCli = struct {
         } else {
             self.has_more_results = false;
             try self.nextState();
-            try self.renderPrompt(0);
+            try self.renderPrompt();
         }
     }
 
-    fn renderPrompt(self: *TuiCli, lines_to_clean: u32) !void {
-        try self.clearLines(lines_to_clean);
+    fn renderPrompt(self: *TuiCli) !void {
+        try self.layout.clearQueryLine();
         try self.writer.writeAll(INPUT_PREFIX);
         try self.query_builder.render(INPUT_PREFIX.len, self.writer);
     }
 
-    fn clearLines(self: *TuiCli, size: u32) !void {
-        try self.writer.writeAll("\r" ++ codes.ERASE_LINE);
-        for (0..size) |_| {
-            try self.writer.writeAll(codes.MOVE_UP ++ "\r" ++ codes.ERASE_LINE);
-        }
+    fn renderDropdown(self: *TuiCli) !void {
+        const dropdown = &self.query_builder.query_kind_dropdown.?;
+        const offset_col: u16 = @intCast(INPUT_PREFIX.len + 3);
+        try self.layout.drawDropdownOverlay(&dropdown.options, dropdown.selected_index, offset_col);
+        try self.layout.positionCursorForInput();
+
+        // Move cursor to end of input
+        var buf: [32]u8 = undefined;
+        const col: u16 = @intCast(INPUT_PREFIX.len + 12); // After query selector
+        const move_cmd = codes.moveTo(&buf, 2, col);
+        try self.writer.writeAll(move_cmd);
+    }
+
+    /// Render initial state when switching to this CLI mode
+    pub fn renderInitial(self: *TuiCli) !void {
+        try self.renderPrompt();
     }
 };

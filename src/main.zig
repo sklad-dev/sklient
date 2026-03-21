@@ -4,6 +4,9 @@ const codes = @import("codes.zig");
 const Cli = @import("cli.zig").Cli;
 const Client = @import("client.zig").Client;
 const Keys = @import("constants.zig").Keys;
+const Layout = @import("layout.zig").Layout;
+const History = @import("history.zig").History;
+const Mode = @import("layout.zig").Mode;
 
 const INPUT_PREFIX = @import("constants.zig").INPUT_PREFIX;
 
@@ -52,20 +55,65 @@ pub fn main() !void {
 
     var writer = stdout.writer(&[0]u8{});
 
-    var cli_instance: Cli = try Cli.init(allocator, &client, &writer.interface);
+    // Initialize layout and history
+    var layout = Layout.init(&writer.interface);
+    var history = History.init(allocator);
+    defer history.deinit();
+
+    // Draw initial frame
+    try layout.drawFrame(.tui);
+
+    var cli_instance: Cli = try Cli.init(allocator, &client, &writer.interface, &layout, &history);
     defer cli_instance.deinit();
 
-    try writer.interface.writeAll(INPUT_PREFIX);
+    // Render initial TUI prompt
     try cli_instance.tui.query_builder.render(INPUT_PREFIX.len, &writer.interface);
+
+    // Escape sequence buffer for multi-byte key sequences
+    var escape_buf: [3]u8 = undefined;
+    var escape_len: usize = 0;
+    var in_escape: bool = false;
 
     var buf: [1]u8 = undefined;
     while (true) {
         const n = try stdin.read(&buf);
-        if (n == 0 or buf[0] == Keys.CTRL_C) break;
-        if (buf[0] == Keys.CTRL_T) {
+        if (n == 0) break;
+
+        const key = buf[0];
+
+        // Handle escape sequences (arrow keys)
+        if (key == 27) { // ESC
+            in_escape = true;
+            escape_len = 0;
+            continue;
+        }
+
+        if (in_escape) {
+            escape_buf[escape_len] = key;
+            escape_len += 1;
+
+            if (escape_len == 2 and escape_buf[0] == '[') {
+                // Complete arrow key sequence
+                in_escape = false;
+                const arrow_key = escape_buf[1];
+                try cli_instance.handleInput(arrow_key);
+                continue;
+            }
+
+            if (escape_len >= 3) {
+                // Unknown escape sequence, ignore
+                in_escape = false;
+            }
+            continue;
+        }
+
+        if (key == Keys.CTRL_C) break;
+
+        if (key == Keys.CTRL_T) {
             try cli_instance.toggleMode();
             continue;
         }
-        try cli_instance.handleInput(buf[0]);
+
+        try cli_instance.handleInput(key);
     }
 }
