@@ -57,6 +57,8 @@ pub const RawCli = struct {
     }
 
     pub fn handleInput(self: *RawCli, key: u8) !void {
+        if (key == Keys.ARROW_UP or key == Keys.ARROW_DOWN) return;
+
         return switch (self.state) {
             .userInput => try self.handleUserInput(key),
             .awaitingContinue => try self.handleAwaitingContinue(key),
