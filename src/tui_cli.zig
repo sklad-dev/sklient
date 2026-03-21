@@ -167,6 +167,8 @@ pub const TuiCli = struct {
             try self.nextState();
         } else if (key == Keys.BACKSPACE) {
             _ = (try self.query_builder.activeBuffer()).?.pop();
+        } else if (key == Keys.ARROW_UP or key == Keys.ARROW_DOWN) {
+            return;
         } else {
             try (try self.query_builder.activeBuffer()).?.append(self.allocator, key);
         }
