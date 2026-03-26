@@ -6,6 +6,7 @@ const delegateWithArg = @import("union_helpers.zig").delegateWithArg;
 const Client = @import("client.zig").Client;
 const TuiCli = @import("tui_cli.zig").TuiCli;
 const RawCli = @import("raw_cli.zig").RawCli;
+const Key = @import("constants.zig").Key;
 
 const INPUT_PREFIX = @import("constants.zig").INPUT_PREFIX;
 
@@ -28,19 +29,20 @@ pub const Cli = union(CliKind) {
         var client: *Client = undefined;
         var writer: *std.Io.Writer = undefined;
 
+        const was_tui = (self.* == .tui);
         switch (self.*) {
             inline else => |*v| {
                 allocator = v.allocator;
-                client = v.client;
+                client = v.executor.client;
                 writer = v.writer;
                 v.deinit();
             },
         }
 
-        self.* = switch (self.*) {
-            .tui => .{ .raw = try RawCli.init(allocator, client, writer) },
-            .raw => .{ .tui = try TuiCli.init(allocator, client, writer) },
-        };
+        self.* = if (was_tui)
+            .{ .raw = try RawCli.init(allocator, client, writer) }
+        else
+            .{ .tui = try TuiCli.init(allocator, client, writer) };
 
         try writer.writeAll("\r" ++ codes.ERASE_LINE ++ INPUT_PREFIX);
         if (self.* == .tui) {
@@ -55,6 +57,6 @@ pub const Cli = union(CliKind) {
         };
     }
 
-    pub const handleInput = delegateWithArg(Cli, "handleInput", u8, anyerror!void);
+    pub const handleInput = delegateWithArg(Cli, "handleInput", Key, anyerror!void);
     pub const deinit = delegate(Cli, "deinit", void);
 };

@@ -37,7 +37,7 @@ pub const QueryBuilder = struct {
         self.query_kind_dropdown = null;
     }
 
-    pub fn activeBuffer(self: *QueryBuilder) !?*std.ArrayList(u8) {
+    pub fn activeBuffer(self: *QueryBuilder) ?*std.ArrayList(u8) {
         if (self.query) |*q| return q.activeBuffer();
 
         return null;

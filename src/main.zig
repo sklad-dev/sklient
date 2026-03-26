@@ -3,6 +3,7 @@ const codes = @import("codes.zig");
 
 const Cli = @import("cli.zig").Cli;
 const Client = @import("client.zig").Client;
+const Key = @import("constants.zig").Key;
 const Keys = @import("constants.zig").Keys;
 
 const INPUT_PREFIX = @import("constants.zig").INPUT_PREFIX;
@@ -18,14 +19,6 @@ fn switchToRawMode(fd: *const std.fs.File) !std.posix.termios {
     try std.posix.tcsetattr(fd.handle, .NOW, raw);
 
     return orig;
-}
-
-fn createScreen(fd: *const std.fs.File) !void {
-    try fd.writeAll(codes.NEW_SCREEN);
-}
-
-fn restoreScreen(fd: *const std.fs.File) !void {
-    try fd.writeAll(codes.EXIT_SCREEN);
 }
 
 pub fn main() !void {
@@ -47,9 +40,6 @@ pub fn main() !void {
     const orig = try switchToRawMode(&stdin);
     defer std.posix.tcsetattr(stdin.handle, .NOW, orig) catch {};
 
-    try createScreen(&stdout);
-    defer restoreScreen(&stdout) catch {};
-
     var writer = stdout.writer(&[0]u8{});
 
     var cli_instance: Cli = try Cli.init(allocator, &client, &writer.interface);
@@ -58,14 +48,30 @@ pub fn main() !void {
     try writer.interface.writeAll(INPUT_PREFIX);
     try cli_instance.tui.query_builder.render(INPUT_PREFIX.len, &writer.interface);
 
-    var buf: [1]u8 = undefined;
+    var buf: [3]u8 = undefined;
     while (true) {
         const n = try stdin.read(&buf);
-        if (n == 0 or buf[0] == Keys.CTRL_C) break;
-        if (buf[0] == Keys.CTRL_T) {
+        if (n == 0) break;
+
+        if (n == 1 and buf[0] == Keys.CTRL_C) break;
+        if (n == 1 and buf[0] == Keys.CTRL_T) {
             try cli_instance.toggleMode();
             continue;
         }
-        try cli_instance.handleInput(buf[0]);
+
+        const key: ?Key = if (n == 3 and buf[0] == 0x1b and buf[1] == '[')
+            switch (buf[2]) {
+                'A' => .arrow_up,
+                'B' => .arrow_down,
+                else => null,
+            }
+        else if (n == 1)
+            .{ .char = buf[0] }
+        else
+            null;
+
+        if (key) |k| {
+            try cli_instance.handleInput(k);
+        }
     }
 }
