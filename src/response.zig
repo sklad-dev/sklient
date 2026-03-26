@@ -115,8 +115,15 @@ const ResponseTable = struct {
                 try writer.writeByte(' ');
             }
         } else {
-            const truncate_at = max_width -| ELLIPSIS.len;
-            try writer.writeAll(str[0..truncate_at]);
+            if (length == str.len + 2) {
+                try writer.writeByte('\'');
+                const truncate_at = max_width -| ELLIPSIS.len -| 2;
+                try writer.writeAll(str[0..truncate_at]);
+                try writer.writeByte('\'');
+            } else {
+                const truncate_at = max_width -| ELLIPSIS.len;
+                try writer.writeAll(str[0..truncate_at]);
+            }
             try writer.writeAll(ELLIPSIS);
         }
     }

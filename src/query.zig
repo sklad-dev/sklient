@@ -26,7 +26,7 @@ pub const Query = union(QueryKind) {
     getRange: GetRangeQuery,
     delete: DeleteQuery,
 
-    pub const activeBuffer = delegate(Query, "activeBuffer", anyerror!?*std.ArrayList(u8));
+    pub const activeBuffer = delegate(Query, "activeBuffer", ?*std.ArrayList(u8));
     pub const deinit = delegate(Query, "deinit", void);
     pub const nextState = delegate(Query, "nextState", anyerror!bool);
     pub const render = delegateWithArg(Query, "render", *std.Io.Writer, anyerror!void);

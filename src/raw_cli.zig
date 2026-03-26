@@ -2,6 +2,8 @@ const std = @import("std");
 const codes = @import("codes.zig");
 
 const Client = @import("client.zig").Client;
+const Executor = @import("request.zig").Executor;
+const Key = @import("constants.zig").Key;
 const Keys = @import("constants.zig").Keys;
 const Response = @import("response.zig").Response;
 const Request = @import("request.zig").Request;
@@ -12,9 +14,8 @@ const INPUT_PREFIX = @import("constants.zig").INPUT_PREFIX;
 pub const RawCli = struct {
     allocator: std.mem.Allocator,
     state: State,
+    executor: Executor,
     input_buffer: std.ArrayList(u8),
-    request_buffer: std.ArrayList(u8),
-    client: *Client,
     writer: *std.Io.Writer,
     has_more_results: bool = false,
 
@@ -28,9 +29,8 @@ pub const RawCli = struct {
         return .{
             .allocator = allocator,
             .state = .userInput,
+            .executor = Executor.init(allocator, client),
             .input_buffer = try std.ArrayList(u8).initCapacity(allocator, 256),
-            .request_buffer = try std.ArrayList(u8).initCapacity(allocator, 1024),
-            .client = client,
             .writer = writer,
         };
     }
@@ -43,7 +43,16 @@ pub const RawCli = struct {
         switch (self.state) {
             .userInput => {
                 self.state = .executing;
-                try self.executeQuery();
+                try self.executor.sendRequest(
+                    RawCli,
+                    .{
+                        .kind = .query,
+                        .query = self.input_buffer.items,
+                        .timestamp = std.time.microTimestamp(),
+                    },
+                    self,
+                    handleResponse,
+                );
             },
             .executing, .awaitingContinue => {
                 self.input_buffer.clearRetainingCapacity();
@@ -56,9 +65,7 @@ pub const RawCli = struct {
         }
     }
 
-    pub fn handleInput(self: *RawCli, key: u8) !void {
-        if (key == Keys.ARROW_UP or key == Keys.ARROW_DOWN) return;
-
+    pub fn handleInput(self: *RawCli, key: Key) !void {
         return switch (self.state) {
             .userInput => try self.handleUserInput(key),
             .awaitingContinue => try self.handleAwaitingContinue(key),
@@ -66,57 +73,39 @@ pub const RawCli = struct {
         };
     }
 
-    pub fn executeQuery(self: *RawCli) !void {
-        try self.sendRequest(.{
-            .kind = .query,
-            .query = self.input_buffer.items,
-            .timestamp = std.time.microTimestamp(),
-        });
-    }
-
-    fn sendRequest(self: *RawCli, req: Request) !void {
-        var json_writer = std.Io.Writer.Allocating.init(self.allocator);
-        defer json_writer.deinit();
-        try req.toString(&json_writer.writer);
-
-        const request_bytes = try json_writer.toOwnedSlice();
-        defer self.allocator.free(request_bytes);
-        const response_bytes = try self.client.send(request_bytes);
-        const response = try std.json.parseFromSlice(Response, self.allocator, response_bytes, .{});
-        defer response.deinit();
-
-        self.has_more_results = switch (response.value.data) {
+    pub fn handleResponse(self: *RawCli, request: *const Request, response: *const Response) !void {
+        self.has_more_results = switch (response.data) {
             .array => |arr| arr.items.len > 0,
             else => false,
         };
-        try self.writer.writeByte('\n');
-        try response.value.render(self.writer, self.has_more_results);
+        if (request.kind != .continue_batch) {
+            try self.writer.writeByte('\n');
+        }
+        try response.render(self.writer, self.has_more_results);
 
         try self.nextState();
         if (!self.has_more_results) {
-            switch (response.value.data) {
+            switch (response.data) {
                 .array => try self.renderPrompt(),
                 else => {},
             }
         }
     }
 
-    fn executeContinueBatch(self: *RawCli) !void {
-        try self.writer.writeAll("\r" ++ codes.ERASE_LINE);
-        try self.sendRequest(.{
-            .kind = .continue_batch,
-            .query = &[_]u8{},
-            .timestamp = std.time.microTimestamp(),
-        });
-    }
-
-    fn handleUserInput(self: *RawCli, key: u8) !void {
-        if (key == Keys.ENTER) {
-            try self.nextState();
-        } else if (key == Keys.BACKSPACE) {
-            _ = self.input_buffer.pop();
-        } else {
-            try self.input_buffer.append(self.allocator, key);
+    fn handleUserInput(self: *RawCli, key: Key) !void {
+        switch (key) {
+            .arrow_up, .arrow_down => return,
+            .char => |c| {
+                if (c == Keys.ENTER) {
+                    try self.nextState();
+                } else if (c == Keys.BACKSPACE) {
+                    if (self.input_buffer.items.len > 0) {
+                        _ = self.input_buffer.pop();
+                    }
+                } else {
+                    try self.input_buffer.append(self.allocator, c);
+                }
+            },
         }
 
         if (self.state != .awaitingContinue) {
@@ -124,13 +113,28 @@ pub const RawCli = struct {
         }
     }
 
-    fn handleAwaitingContinue(self: *RawCli, key: u8) !void {
-        if (key == 'n' or key == 'N') {
-            try self.executeContinueBatch();
-        } else {
-            self.has_more_results = false;
-            try self.nextState();
-            try self.renderPrompt();
+    fn handleAwaitingContinue(self: *RawCli, key: Key) !void {
+        switch (key) {
+            .arrow_up, .arrow_down => {},
+            .char => |c| {
+                if (c == 'n' or c == 'N') {
+                    try self.writer.writeAll("\r" ++ codes.ERASE_LINE);
+                    try self.executor.sendRequest(
+                        RawCli,
+                        .{
+                            .kind = .continue_batch,
+                            .query = &[_]u8{},
+                            .timestamp = std.time.microTimestamp(),
+                        },
+                        self,
+                        handleResponse,
+                    );
+                } else {
+                    self.has_more_results = false;
+                    try self.nextState();
+                    try self.renderPrompt();
+                }
+            },
         }
     }
 
